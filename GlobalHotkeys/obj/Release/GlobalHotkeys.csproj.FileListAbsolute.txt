@@ -1,0 +1,13 @@
+C:\Users\phuze\Dropbox\Programming\GlobalHotkeys\GlobalHotkeys\bin\Release\GlobalHotkeys.exe.config
+C:\Users\phuze\Dropbox\Programming\GlobalHotkeys\GlobalHotkeys\bin\Release\GlobalHotkeys.exe
+C:\Users\phuze\Dropbox\Programming\GlobalHotkeys\GlobalHotkeys\bin\Release\GlobalHotkeys.pdb
+C:\Users\phuze\Dropbox\Programming\GlobalHotkeys\GlobalHotkeys\obj\Release\GlobalHotkeys.Form1.resources
+C:\Users\phuze\Dropbox\Programming\GlobalHotkeys\GlobalHotkeys\obj\Release\GlobalHotkeys.Properties.Resources.resources
+C:\Users\phuze\Dropbox\Programming\GlobalHotkeys\GlobalHotkeys\obj\Release\GlobalHotkeys.csproj.GenerateResource.cache
+C:\Users\phuze\Dropbox\Programming\GlobalHotkeys\GlobalHotkeys\obj\Release\GlobalHotkeys.csproj.CoreCompileInputs.cache
+C:\Users\phuze\Dropbox\Programming\GlobalHotkeys\GlobalHotkeys\obj\Release\GlobalHotkeys.exe
+C:\Users\phuze\Dropbox\Programming\GlobalHotkeys\GlobalHotkeys\obj\Release\GlobalHotkeys.pdb
+C:\Users\phuze\Dropbox\Programming\GlobalHotkeys\GlobalHotkeys\obj\Release\GlobalHotkeys.csprojAssemblyReference.cache
+C:\Users\phuze\Dropbox\Programming\GlobalHotkeys\GlobalHotkeys\bin\Release\CSCore.dll
+C:\Users\phuze\Dropbox\Programming\GlobalHotkeys\GlobalHotkeys\bin\Release\CSCore.xml
+C:\Users\phuze\Dropbox\Programming\GlobalHotkeys\GlobalHotkeys\obj\Release\GlobalHotkeys.csproj.CopyComplete
