@@ -13,8 +13,14 @@
     <LangVersion>latest</LangVersion>
     <AnalysisLevel>latest</AnalysisLevel>
 
-    <RuntimeIdentifier>win-x86</RuntimeIdentifier>
-    <SelfContained>true</SelfContained>
+    <!-- Output directly to bin\\Debug or bin\\Release -->
+    <BaseOutputPath>bin\</BaseOutputPath>
+    <BaseIntermediateOutputPath>obj\</BaseIntermediateOutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+
+    <!-- Keep normal builds lightweight (framework-dependent). Publishing is handled by scripts/publish-and-deploy.ps1 -->
+    <SelfContained>false</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
