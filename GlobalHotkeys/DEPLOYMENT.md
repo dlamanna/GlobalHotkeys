@@ -1,12 +1,13 @@
-# GlobalHotkeys2 Deployment
+# GlobalHotkeys Deployment
 
-This document explains how to deploy GlobalHotkeys2 to your system after building the project.
+This document explains how to publish and deploy GlobalHotkeys to your system.
 
 ## Overview
 
-After successfully building the project, you can use the provided deployment scripts to:
-1. Kill any running instances of GlobalHotkeys2.exe
-2. Copy the executable and supporting files to `C:\Program Files\GlobalHotkeys`
+After successfully publishing the project, you can use the provided script to:
+1. Kill any running instances of `GlobalHotkeys.exe`
+2. Copy the published single-file executable to `C:\Program Files\GlobalHotkeys`
+3. Optionally restart the app
 
 ## Prerequisites
 
@@ -14,47 +15,29 @@ After successfully building the project, you can use the provided deployment scr
 - **Successful build** - Ensure the project builds without errors
 - **Windows 10/11** - The scripts are designed for modern Windows systems
 
-## Deployment Scripts
+## Deployment Script
 
-### Option 1: PowerShell Script (Recommended)
-- **File**: `post-build-deploy.ps1`
-- **Features**: Better error handling, colored output, progress indicators
-- **Usage**: Right-click and "Run as administrator"
-
-### Option 2: Batch File
-- **File**: `post-build-deploy.bat`
-- **Features**: Simple, works on all Windows systems
-- **Usage**: Right-click and "Run as administrator"
-
-### Option 3: Launcher Batch File
-- **File**: `run-deploy-as-admin.bat`
-- **Features**: Launches the PowerShell script with proper privileges
-- **Usage**: Double-click (will prompt for admin credentials)
+- **File**: `scripts/publish-and-deploy.ps1`
+- **What it does**: `dotnet publish` (single-file) + stop/copy/restart
+- **Usage**: Run it normally; it will self-elevate to admin when needed.
 
 ## Quick Deployment Steps
 
-1. **Build the project**:
-   ```bash
-   dotnet build --configuration Release
+1. **Publish + deploy**:
+   ```powershell
+   pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\publish-and-deploy.ps1 -Configuration Release
    ```
 
-2. **Run deployment script**:
-   - Right-click on `post-build-deploy.ps1`
-   - Select "Run as administrator"
-   - Follow the on-screen prompts
-
-3. **Verify installation**:
-   - Check `C:\Program Files\GlobalHotkeys\GlobalHotkeys2.exe`
+2. **Verify installation**:
+   - Check `C:\Program Files\GlobalHotkeys\GlobalHotkeys.exe`
 
 ## What Gets Deployed
 
-The deployment script copies the following files:
-- `GlobalHotkeys2.exe` - Main executable
-- `*.dll` - All required DLL files (NAudio, Keyboard, etc.)
-- `*.config` - Configuration files
-- `*.json` - Runtime configuration files
-- `ProcessList.txt` - List of applications to mute
-- `SoundDevices.txt` - Audio device configuration
+The script deploys a single executable:
+- `GlobalHotkeys.exe` - single-file published executable
+
+Notes:
+- `ProcessList.txt` and `SoundDevices.txt` are expected to be present under the install directory. If you prefer to keep them elsewhere, use symlinks/junctions pointing into `C:\Program Files\GlobalHotkeys`.
 
 ## Troubleshooting
 
@@ -63,9 +46,8 @@ The deployment script copies the following files:
 - Check if antivirus software is blocking the operation
 - Verify the target directory permissions
 
-### "Source executable not found" Error
-- Build the project first: `dotnet build --configuration Release`
-- Check that the build output is in `bin\Release\net8.0-windows\win-x86\`
+### "Publish completed but no .exe found" Error
+- Ensure the publish step is succeeding and producing a single-file executable.
 
 ### Process Termination Issues
 - Some processes may be protected by Windows
@@ -76,15 +58,15 @@ The deployment script copies the following files:
 
 If the scripts don't work, you can manually:
 
-1. Stop any running GlobalHotkeys2.exe processes
+1. Stop any running GlobalHotkeys.exe processes
 2. Create `C:\Program Files\GlobalHotkeys` directory
-3. Copy all files from `bin\Release\net8.0-windows\win-x86\` to the target directory
-4. Copy `ProcessList.txt` and `SoundDevices.txt` from the project root
+3. Copy the published `GlobalHotkeys.exe` into the target directory
+4. Ensure `ProcessList.txt` and `SoundDevices.txt` are available in the install directory (copy or symlink)
 
 ## Post-Deployment
 
 After successful deployment:
-- The application is available at `C:\Program Files\GlobalHotkeys\GlobalHotkeys2.exe`
+- The application is available at `C:\Program Files\GlobalHotkeys\GlobalHotkeys.exe`
 - You can run the application from that location
 - The application will use the configuration files in the installation directory
 
