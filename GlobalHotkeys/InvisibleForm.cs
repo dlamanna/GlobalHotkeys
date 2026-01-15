@@ -41,6 +41,7 @@ namespace GlobalHotkeys
         private volatile bool logThreadRunning = true;
         private StreamWriter? logWriter;
         private readonly object logWriterLock = new();
+        private static readonly ConcurrentDictionary<Type, System.Reflection.MemberInfo?> SessionPidMemberCache = new();
 
         // Audio session info class for caching
         private class AudioSessionInfo
@@ -51,11 +52,69 @@ namespace GlobalHotkeys
             public bool IsMuted { get; set; } = false;
         }
 
+        private static int? TryGetSessionProcessIdFast(AudioSessionControl session)
+        {
+            var type = session.GetType();
+
+            var member = SessionPidMemberCache.GetOrAdd(type, static t =>
+                (System.Reflection.MemberInfo?)t.GetProperty("GetProcessID")
+                ?? t.GetMethod("GetProcessID", Type.EmptyTypes));
+
+            try
+            {
+                if (member is System.Reflection.PropertyInfo prop)
+                {
+                    var value = prop.GetValue(session);
+                    return value switch
+                    {
+                        int i when i > 0 => i,
+                        uint u when u > 0 => unchecked((int)u),
+                        _ => null
+                    };
+                }
+
+                if (member is System.Reflection.MethodInfo method)
+                {
+                    var value = method.Invoke(session, null);
+                    return value switch
+                    {
+                        int i when i > 0 => i,
+                        uint u when u > 0 => unchecked((int)u),
+                        _ => null
+                    };
+                }
+            }
+            catch
+            {
+                // ignore
+            }
+
+            return null;
+        }
+
         // Method to get the actual process name from an audio session
         private string? GetProcessNameFromSession(AudioSessionControl session)
         {
             try
             {
+                // Fast path: PID -> process name (cached reflection)
+                int? pid = TryGetSessionProcessIdFast(session);
+                if (pid is int p && p > 0)
+                {
+                    try
+                    {
+                        using var process = Process.GetProcessById(p);
+                        if (!string.IsNullOrEmpty(process.ProcessName))
+                        {
+                            return process.ProcessName;
+                        }
+                    }
+                    catch
+                    {
+                        // Process might not exist anymore, continue
+                    }
+                }
+
                 // First, try to access the GetProcessID property directly
                 var sessionType = session.GetType();
                 var processIdProperty = sessionType.GetProperty("GetProcessID");
@@ -71,8 +130,8 @@ namespace GlobalHotkeys
                             {
                                 try
                                 {
-                                    var process = Process.GetProcessById((int)processIdUint);
-                                    if (process != null && !string.IsNullOrEmpty(process.ProcessName))
+                                    using var process = Process.GetProcessById((int)processIdUint);
+                                    if (!string.IsNullOrEmpty(process.ProcessName))
                                     {
                                         //Log($"%%% Found process: {process.ProcessName} (PID: {processIdUint})");
                                         return process.ProcessName;
@@ -87,12 +146,12 @@ namespace GlobalHotkeys
                             {
                                 try
                                 {
-                                    var process = Process.GetProcessById(processIdInt);
-                                        if (process != null && !string.IsNullOrEmpty(process.ProcessName))
-                                        {
-                                            //Log($"%%% Found process: {process.ProcessName} (PID: {processIdInt})");
-                                            return process.ProcessName;
-                                        }
+                                    using var process = Process.GetProcessById(processIdInt);
+                                    if (!string.IsNullOrEmpty(process.ProcessName))
+                                    {
+                                        //Log($"%%% Found process: {process.ProcessName} (PID: {processIdInt})");
+                                        return process.ProcessName;
+                                    }
                                 }
                                 catch
                                 {
@@ -138,8 +197,8 @@ namespace GlobalHotkeys
                                                 {
                                                     try
                                                     {
-                                                        var process = Process.GetProcessById((int)actualProcessId);
-                                                        if (process != null && !string.IsNullOrEmpty(process.ProcessName))
+                                                        using var process = Process.GetProcessById((int)actualProcessId);
+                                                        if (!string.IsNullOrEmpty(process.ProcessName))
                                                         {
                                                             //Log($"%%% Found process: {process.ProcessName} (PID: {actualProcessId})");
                                                             return process.ProcessName;
@@ -158,8 +217,8 @@ namespace GlobalHotkeys
                                                 {
                                                     try
                                                     {
-                                                        var process = Process.GetProcessById(processIdInt);
-                                                        if (process != null && !string.IsNullOrEmpty(process.ProcessName))
+                                                        using var process = Process.GetProcessById(processIdInt);
+                                                        if (!string.IsNullOrEmpty(process.ProcessName))
                                                         {
                                                             //Log($"%%% Found process: {process.ProcessName} (PID: {actualProcessId})");
                                                             return process.ProcessName;
@@ -203,8 +262,8 @@ namespace GlobalHotkeys
                                                 {
                                                     try
                                                     {
-                                                        var process = Process.GetProcessById((int)actualProcessId);
-                                                        if (process != null && !string.IsNullOrEmpty(process.ProcessName))
+                                                        using var process = Process.GetProcessById((int)actualProcessId);
+                                                        if (!string.IsNullOrEmpty(process.ProcessName))
                                                         {
                                                             //Log($"%%% Found process: {process.ProcessName} (PID: {actualProcessId})");
                                                             return process.ProcessName;
@@ -223,8 +282,8 @@ namespace GlobalHotkeys
                                                 {
                                                     try
                                                     {
-                                                        var process = Process.GetProcessById(processIdInt);
-                                                        if (process != null && !string.IsNullOrEmpty(process.ProcessName))
+                                                        using var process = Process.GetProcessById(processIdInt);
+                                                        if (!string.IsNullOrEmpty(process.ProcessName))
                                                         {
                                                             //Log($"%%% Found process: {process.ProcessName} (PID: {actualProcessId})");
                                                             return process.ProcessName;
@@ -422,9 +481,44 @@ namespace GlobalHotkeys
 
         private void RefreshAudioSessionCache(object? state = null)
         {
+            // Early exit if no processes to monitor
+            if (processNameSet.Count == 0)
+            {
+                Dictionary<string, List<AudioSessionInfo>>? oldCache = null;
+                lock (audioCacheLock)
+                {
+                    oldCache = new Dictionary<string, List<AudioSessionInfo>>(audioSessionCache, StringComparer.OrdinalIgnoreCase);
+                    audioSessionCache.Clear();
+                }
+
+                if (oldCache != null)
+                {
+                    foreach (var kvp in oldCache)
+                    foreach (var sessionInfo in kvp.Value)
+                        try { sessionInfo.Session?.Dispose(); } catch { }
+                }
+
+                return;
+            }
             try
             {
                 if (audioDeviceEnumerator == null) return;
+
+                string? perfVar = Environment.GetEnvironmentVariable("GLOBALHOTKEYS_PERF");
+                bool perfEnabled = !string.IsNullOrWhiteSpace(perfVar)
+                    && !string.Equals(perfVar.Trim(), "0", StringComparison.Ordinal)
+                    && !string.Equals(perfVar.Trim(), "false", StringComparison.OrdinalIgnoreCase);
+                Stopwatch? sw = perfEnabled ? Stopwatch.StartNew() : null;
+
+                // Per-refresh PID->processName cache to avoid repeated Process.GetProcessById calls.
+                var pidToName = new Dictionary<int, string>();
+
+                int deviceCount = 0;
+                int relevantDeviceCount = 0;
+                int sessionCount = 0;
+                int keptSessions = 0;
+                int pidHits = 0;
+                int pidMisses = 0;
 
                 var newAudioSessionCache = new Dictionary<string, List<AudioSessionInfo>>(StringComparer.OrdinalIgnoreCase);
                 
@@ -436,14 +530,29 @@ namespace GlobalHotkeys
                     {
                         try
                         {
+                            deviceCount++;
+
                             // Check if this device is in our list of relevant devices
-                            bool isRelevantDevice = (relevantSoundDevices.Count == 0) || relevantSoundDevices.Any(deviceName =>
-                                device.FriendlyName.Contains(deviceName, StringComparison.OrdinalIgnoreCase));
+                            bool isRelevantDevice = relevantSoundDevices.Count == 0;
+                            if (!isRelevantDevice)
+                            {
+                                string friendly = device.FriendlyName;
+                                for (int d = 0; d < relevantSoundDevices.Count; d++)
+                                {
+                                    if (friendly.Contains(relevantSoundDevices[d], StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        isRelevantDevice = true;
+                                        break;
+                                    }
+                                }
+                            }
 
                             if (!isRelevantDevice)
                             {
                                 continue;
                             }
+
+                            relevantDeviceCount++;
 
                             var sessions = device.AudioSessionManager?.Sessions;
                             if (sessions != null)
@@ -451,14 +560,42 @@ namespace GlobalHotkeys
                                 for (int i = 0; i < sessions.Count; i++)
                                 {
                                     var session = sessions[i];
+                                    sessionCount++;
 
                                     // Try to get the actual process name from the session
                                     string? processName = null;
 
                                     try
                                     {
-                                        // Use our method to get the actual process name
-                                        processName = GetProcessNameFromSession(session);
+                                        // Fast path: PID -> process name (avoid reflection heavy fallbacks and repeated Process.GetProcessById)
+                                        int? pid = TryGetSessionProcessIdFast(session);
+                                        if (pid is int p && p > 0)
+                                        {
+                                            if (pidToName.TryGetValue(p, out var cachedName))
+                                            {
+                                                processName = cachedName;
+                                                if (perfEnabled) pidHits++;
+                                            }
+                                            else
+                                            {
+                                                if (perfEnabled) pidMisses++;
+                                                try
+                                                {
+                                                    using var proc = Process.GetProcessById(p);
+                                                    if (!string.IsNullOrEmpty(proc.ProcessName))
+                                                    {
+                                                        pidToName[p] = proc.ProcessName;
+                                                        processName = proc.ProcessName;
+                                                    }
+                                                }
+                                                catch
+                                                {
+                                                    // Process may have exited
+                                                }
+                                            }
+                                        }
+
+                                        processName ??= GetProcessNameFromSession(session);
 
                                         if (string.IsNullOrEmpty(processName))
                                         {
@@ -478,6 +615,8 @@ namespace GlobalHotkeys
                                         session.Dispose();
                                         continue;
                                     }
+
+                                    keptSessions++;
 
                                     if (!newAudioSessionCache.TryGetValue(processName, out var list))
                                     {
@@ -537,6 +676,12 @@ namespace GlobalHotkeys
                 if (newAudioSessionCache.Count > 0)
                 {
                     //Log($"%%% Audio cache updated: {newAudioSessionCache.Count} relevant processes found");
+                }
+
+                if (perfEnabled && sw != null)
+                {
+                    sw.Stop();
+                    Log($"PERF AudioCache: {sw.ElapsedMilliseconds}ms devices={deviceCount} relevantDevices={relevantDeviceCount} sessions={sessionCount} kept={keptSessions} pidHits={pidHits} pidMisses={pidMisses} pidCache={pidToName.Count}");
                 }
             }
             catch (Exception ex)
@@ -645,11 +790,10 @@ namespace GlobalHotkeys
                 return;
             }
 
-            processNameList = File.ReadLines(applicationListPath)
+            processNameList = [.. File.ReadLines(applicationListPath)
                 .Select(line => line.Trim())
                 .Where(line => line.Length > 0 && !line.StartsWith('#'))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
+                .Distinct(StringComparer.OrdinalIgnoreCase)];
 
             processNameSet.Clear();
             foreach (var name in processNameList)
@@ -680,11 +824,10 @@ namespace GlobalHotkeys
                 return;
             }
 
-            relevantSoundDevices = File.ReadLines(soundDevicesPath)
+            relevantSoundDevices = [.. File.ReadLines(soundDevicesPath)
                 .Select(line => line.Trim())
                 .Where(line => line.Length > 0 && !line.StartsWith('#'))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
+                .Distinct(StringComparer.OrdinalIgnoreCase)];
 
             foreach (string device in relevantSoundDevices)
             {
@@ -944,8 +1087,19 @@ namespace GlobalHotkeys
                     try
                     {
                         // Check if this device is in our list of relevant devices
-                        bool isRelevantDevice = relevantSoundDevices.Any(deviceName => 
-                            device.FriendlyName.Contains(deviceName, StringComparison.OrdinalIgnoreCase));
+                        bool isRelevantDevice = false;
+                        if (relevantSoundDevices.Count > 0)
+                        {
+                            string friendly = device.FriendlyName;
+                            for (int d = 0; d < relevantSoundDevices.Count; d++)
+                            {
+                                if (friendly.Contains(relevantSoundDevices[d], StringComparison.OrdinalIgnoreCase))
+                                {
+                                    isRelevantDevice = true;
+                                    break;
+                                }
+                            }
+                        }
                         
                         if (!isRelevantDevice)
                         {
@@ -1032,17 +1186,22 @@ namespace GlobalHotkeys
 
         private IntPtr RunProgram(string filePath, params string[] arguments)
         {
-            Process proc = new();
-            ProcessStartInfo pi = new()
+            using var proc = new Process();
 
+            proc.StartInfo = new ProcessStartInfo
             {
-                UseShellExecute = true,
-                FileName = @filePath,
-                Arguments = string.Join(" ",arguments),
-                CreateNoWindow = true
+                UseShellExecute = false,
+                FileName = filePath,
+                Arguments = string.Join(" ", arguments),
+                CreateNoWindow = true,
+                // Optional clarity: when UseShellExecute=false, this is respected for console apps
+                WindowStyle = ProcessWindowStyle.Hidden,
+                WorkingDirectory = Path.GetDirectoryName(filePath) ?? AppContext.BaseDirectory,
             };
-            proc.StartInfo = pi;
+
             proc.Start();
+
+            // Note: for GUI apps this can be 0 immediately; current code already assumes that.
             return proc.MainWindowHandle;
         }
 
