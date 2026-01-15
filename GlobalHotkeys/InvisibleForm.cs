@@ -1,5 +1,7 @@
 ﻿using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Collections.Concurrent;
+using System.Text;
 using NAudio.CoreAudioApi;
 
 namespace GlobalHotkeys
@@ -11,8 +13,9 @@ namespace GlobalHotkeys
         public const int VK_SPACE = 0x20;
         public const int KEYEVENTF_KEYDOWN = 0x0001;        //Key down flag
         public const int KEYEVENTF_KEYUP = 0x0002;          //Key up flag
-        private List<string> currentAppsToMute = [];
+        private readonly HashSet<string> currentAppsToMute = new(StringComparer.OrdinalIgnoreCase);
         private List<string> processNameList = [];
+        private readonly HashSet<string> processNameSet = new(StringComparer.OrdinalIgnoreCase);
         private List<string> relevantSoundDevices = [];
         //private readonly string nirCMDPath = @"C:\Windows\SysWOW64\nircmd.exe";
         private readonly string petBattlePath = @"C:\Program Files (x86)\AutoIt3\USERCREATED\simplePetBattle.exe";
@@ -22,7 +25,7 @@ namespace GlobalHotkeys
         private readonly KeyboardHook hook = new KeyboardHook();
 
         // Performance optimization: Cache for process lookups
-        private readonly Dictionary<string, Process[]> processCache = [];
+        private readonly Dictionary<string, int> processCache = new(StringComparer.OrdinalIgnoreCase);
         private System.Threading.Timer? processCacheRefreshTimer;
         private readonly object processCacheLock = new();
 
@@ -32,10 +35,12 @@ namespace GlobalHotkeys
         private readonly object audioCacheLock = new();
 
         // Performance optimization: Background thread for logging
-        private readonly Queue<string> logQueue = new();
-        private readonly object logLock = new();
+        private readonly ConcurrentQueue<string> logQueue = new();
+        private readonly AutoResetEvent logSignal = new(false);
         private Thread? logThread;
         private volatile bool logThreadRunning = true;
+        private StreamWriter? logWriter;
+        private readonly object logWriterLock = new();
 
         // Audio session info class for caching
         private class AudioSessionInfo
@@ -303,12 +308,13 @@ namespace GlobalHotkeys
         {
             InitializeComponent();
 
+            ResetLog();
+
             // Initialize performance optimizations
             InitializePerformanceOptimizations();
 
             // register the event that is fired after the key press.
             hook.KeyPressed += new EventHandler<KeyPressedEventArgs>(Hook_KeyPressed);
-            ResetLog();
 
             GlobalHotkeys.ModifierKeys ctrl = GlobalHotkeys.ModifierKeys.Control;
             // Mute/Unmute Game Toggle (Defaults: PUBG/Tarkov/Naraka/NewWorld/Battlefield/CoD/WoW/LostArk/BDO)
@@ -369,30 +375,43 @@ namespace GlobalHotkeys
         {
             try
             {
-                // Use a more efficient approach - get all processes once and filter
-                var allProcesses = Process.GetProcesses();
-                var processDict = new Dictionary<string, Process[]>(StringComparer.OrdinalIgnoreCase);
-                
-                foreach (string processName in processNameList)
+                if (processNameSet.Count == 0)
+                {
+                    lock (processCacheLock)
+                    {
+                        processCache.Clear();
+                    }
+                    return;
+                }
+
+                // IMPORTANT: do not cache Process objects (they hold OS handles).
+                // Cache only counts to keep the hotkey path fast without leaking handles.
+                var processCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                foreach (var process in Process.GetProcesses())
                 {
                     try
                     {
-                        var matchingProcesses = allProcesses
-                            .Where(p => string.Equals(p.ProcessName, processName, StringComparison.OrdinalIgnoreCase))
-                            .ToArray();
-                        
-                        if (matchingProcesses.Length > 0)
+                        var name = process.ProcessName;
+                        if (processNameSet.Contains(name))
                         {
-                            processDict[processName] = matchingProcesses;
+                            processCounts.TryGetValue(name, out int count);
+                            processCounts[name] = count + 1;
                         }
                     }
-                    catch (Exception) { /* Ignore individual process errors */ }
+                    catch
+                    {
+                        // Ignore individual process errors
+                    }
+                    finally
+                    {
+                        process.Dispose();
+                    }
                 }
                 
                 lock (processCacheLock)
                 {
                     processCache.Clear();
-                    foreach (var kvp in processDict)
+                    foreach (var kvp in processCounts)
                     {
                         processCache[kvp.Key] = kvp.Value;
                     }
@@ -411,89 +430,106 @@ namespace GlobalHotkeys
                 
                 // Enumerate all audio devices
                 var devices = audioDeviceEnumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active);
-                
-                foreach (var device in devices)
+                try
                 {
-                    try
+                    foreach (var device in devices)
                     {
-                        // Check if this device is in our list of relevant devices
-                        bool isRelevantDevice = relevantSoundDevices.Any(deviceName => 
-                            device.FriendlyName.Contains(deviceName, StringComparison.OrdinalIgnoreCase));
-                        
-                        if (!isRelevantDevice)
+                        try
                         {
-                            //Log($"%%% Skipping audio device: {device.FriendlyName} (not in SoundDevices.txt)");
-                            continue;
-                        }
-                        
-                        var sessions = device.AudioSessionManager?.Sessions;
-                        if (sessions != null)
-                        {
-                            for (int i = 0; i < sessions.Count; i++)
+                            // Check if this device is in our list of relevant devices
+                            bool isRelevantDevice = (relevantSoundDevices.Count == 0) || relevantSoundDevices.Any(deviceName =>
+                                device.FriendlyName.Contains(deviceName, StringComparison.OrdinalIgnoreCase));
+
+                            if (!isRelevantDevice)
                             {
-                                var session = sessions[i];
-                                
-                                // Try to get the actual process name from the session
-                                string? processName = null;
-                                
-                                try
+                                continue;
+                            }
+
+                            var sessions = device.AudioSessionManager?.Sessions;
+                            if (sessions != null)
+                            {
+                                for (int i = 0; i < sessions.Count; i++)
                                 {
-                                    // Use our new method to get the actual process name
-                                    processName = GetProcessNameFromSession(session);
-                                    
-                                    if (string.IsNullOrEmpty(processName))
+                                    var session = sessions[i];
+
+                                    // Try to get the actual process name from the session
+                                    string? processName = null;
+
+                                    try
                                     {
-                                        // Fallback to generic name if we can't get the process name
+                                        // Use our method to get the actual process name
+                                        processName = GetProcessNameFromSession(session);
+
+                                        if (string.IsNullOrEmpty(processName))
+                                        {
+                                            // Fallback to generic name if we can't get the process name
+                                            processName = $"Session_{i}";
+                                        }
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        Log($"### Error getting session info for session {i}: {ex.Message}");
                                         processName = $"Session_{i}";
                                     }
+
+                                    // Fast path: only cache sessions for relevant processes
+                                    if (!processNameSet.Contains(processName))
+                                    {
+                                        session.Dispose();
+                                        continue;
+                                    }
+
+                                    if (!newAudioSessionCache.TryGetValue(processName, out var list))
+                                    {
+                                        list = [];
+                                        newAudioSessionCache[processName] = list;
+                                    }
+
+                                    list.Add(new AudioSessionInfo
+                                    {
+                                        ProcessName = processName,
+                                        Session = session,
+                                        DeviceName = device.FriendlyName,
+                                        IsMuted = session.SimpleAudioVolume?.Mute ?? false
+                                    });
                                 }
-                                catch (Exception ex) { 
-                                    Log($"### Error getting session info for session {i}: {ex.Message}");
-                                    processName = $"Session_{i}";
-                                }
-                                
-                                // Check if this process is in our list of relevant processes
-                                bool isRelevantProcess = processNameList.Any(targetProcess => 
-                                    processName.Equals(targetProcess, StringComparison.OrdinalIgnoreCase));
-                                
-                                if (!isRelevantProcess)
-                                {
-                                    continue;
-                                }
-                                
-                                // Only log when we find a relevant process (this is important info)
-                                Log($"%%% Found relevant process: {processName} on device: {device.FriendlyName}");
-                                
-                                if (!newAudioSessionCache.ContainsKey(processName))
-                                {
-                                    newAudioSessionCache[processName] = [];
-                                }
-                                
-                                var audioSessionInfo = new AudioSessionInfo
-                                {
-                                    ProcessName = processName,
-                                    Session = session,
-                                    DeviceName = device.FriendlyName,
-                                    IsMuted = session.SimpleAudioVolume?.Mute ?? false
-                                };
-                                
-                                newAudioSessionCache[processName].Add(audioSessionInfo);
                             }
                         }
-                    }
-                    catch (Exception) { /* Ignore individual device errors */ }
-                    finally
-                    {
-                        device?.Dispose();
+                        catch (Exception)
+                        {
+                            /* Ignore individual device errors */
+                        }
+                        finally
+                        {
+                            device?.Dispose();
+                        }
                     }
                 }
+                finally
+                {
+                    (devices as IDisposable)?.Dispose();
+                }
                 
+                Dictionary<string, List<AudioSessionInfo>>? oldCache = null;
                 lock (audioCacheLock)
                 {
+                    oldCache = new Dictionary<string, List<AudioSessionInfo>>(audioSessionCache, StringComparer.OrdinalIgnoreCase);
                     audioSessionCache.Clear();
                     foreach (var kvp in newAudioSessionCache)
                     {
                         audioSessionCache[kvp.Key] = kvp.Value;
+                    }
+                }
+
+                // Dispose old COM objects outside lock
+                if (oldCache != null)
+                {
+                    foreach (var kvp in oldCache)
+                    {
+                        foreach (var sessionInfo in kvp.Value)
+                        {
+                            try { sessionInfo.Session?.Dispose(); } catch { }
+                        }
                     }
                 }
                 
@@ -511,49 +547,74 @@ namespace GlobalHotkeys
 
         private void ProcessLogQueue()
         {
-            while (logThreadRunning)
-            {
-                try
-                {
-                    string? logEntry = null;
-                    lock (logLock)
-                    {
-                        if (logQueue.Count > 0)
-                        {
-                            logEntry = logQueue.Dequeue();
-                        }
-                    }
-
-                    if (logEntry != null)
-                    {
-                        WriteLogToFile(logEntry);
-                    }
-                    else
-                    {
-                        Thread.Sleep(10); // Small delay when no logs to process
-                    }
-                }
-                catch (Exception) { /* Ignore logging errors */ }
-            }
-        }
-
-        private void WriteLogToFile(string logEntry)
-        {
-            string logPath = "GlobalHotkeys.log";
             try
             {
-                File.AppendAllText(logPath, logEntry + Environment.NewLine);
-                Console.WriteLine(logEntry);
+                var logPath = Path.Combine(AppContext.BaseDirectory, "GlobalHotkeys.log");
+                lock (logWriterLock)
+                {
+                    logWriter = new StreamWriter(new FileStream(logPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite), Encoding.UTF8)
+                    {
+                        AutoFlush = true
+                    };
+                }
+
+                while (logThreadRunning)
+                {
+                    // Sleep efficiently until we have work (or periodically wake to allow shutdown)
+                    logSignal.WaitOne(250);
+
+                    while (logQueue.TryDequeue(out var logEntry))
+                    {
+                        try
+                        {
+                            lock (logWriterLock)
+                            {
+                                logWriter?.WriteLine(logEntry);
+                            }
+                        }
+                        catch
+                        {
+                            // Ignore logging errors
+                        }
+                    }
+                }
             }
-            catch (Exception) { /* Ignore file write errors */ }
+            catch
+            {
+                // Ignore logging init errors
+            }
+            finally
+            {
+                lock (logWriterLock)
+                {
+                    logWriter?.Dispose();
+                    logWriter = null;
+                }
+            }
         }
 
-        ~InvisibleForm() {
-            logThreadRunning = false;
-            processCacheRefreshTimer?.Dispose();
-            audioCacheRefreshTimer?.Dispose();
-            audioDeviceEnumerator?.Dispose();
-            hook.Dispose();
+        private void DisposeResources()
+        {
+            try
+            {
+                logThreadRunning = false;
+                logSignal.Set();
+
+                processCacheRefreshTimer?.Dispose();
+                audioCacheRefreshTimer?.Dispose();
+                audioDeviceEnumerator?.Dispose();
+                hook.Dispose();
+
+                if (logThread != null && logThread.IsAlive)
+                {
+                    // Avoid hanging on exit
+                    logThread.Join(500);
+                }
+            }
+            catch
+            {
+                // Best-effort cleanup
+            }
         }
 
         private bool IsHotkeyRegistrationSuccessful(ModifierKeys keys, Keys key)
@@ -576,7 +637,26 @@ namespace GlobalHotkeys
         public void ScanApplications()
         {
             string applicationListPath = "ProcessList.txt";
-            processNameList = File.ReadAllText(applicationListPath).Split(new string[] { "\r\n", "\r", "\n" },StringSplitOptions.None).ToList();
+            if (!File.Exists(applicationListPath))
+            {
+                processNameList = [];
+                processNameSet.Clear();
+                Log($"### Missing {applicationListPath}; no processes will be toggled");
+                return;
+            }
+
+            processNameList = File.ReadLines(applicationListPath)
+                .Select(line => line.Trim())
+                .Where(line => line.Length > 0 && !line.StartsWith('#'))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            processNameSet.Clear();
+            foreach (var name in processNameList)
+            {
+                processNameSet.Add(name);
+            }
+
             foreach (string process in processNameList)
             {
                 Log($"%%% Process scanned in: {process}");
@@ -593,7 +673,19 @@ namespace GlobalHotkeys
         public void ScanSoundDevices()
         {
             string soundDevicesPath = "SoundDevices.txt";
-            relevantSoundDevices = File.ReadAllText(soundDevicesPath).Split(new string[] { "\r\n", "\r", "\n" }, StringSplitOptions.None).ToList();
+            if (!File.Exists(soundDevicesPath))
+            {
+                relevantSoundDevices = [];
+                Log($"### Missing {soundDevicesPath}; all devices will be ignored");
+                return;
+            }
+
+            relevantSoundDevices = File.ReadLines(soundDevicesPath)
+                .Select(line => line.Trim())
+                .Where(line => line.Length > 0 && !line.StartsWith('#'))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
             foreach (string device in relevantSoundDevices)
             {
                 Log($"$$$ Sound device scanned in: {device}");
@@ -605,10 +697,8 @@ namespace GlobalHotkeys
             string combinedLogOutput = $"{DateTime.Now:HH:mm:ss.fff}:\t{string.Join(" ", logOutput)}";
             
             // Queue log entry for background processing to avoid blocking
-            lock (logLock)
-            {
-                logQueue.Enqueue(combinedLogOutput);
-            }
+            logQueue.Enqueue(combinedLogOutput);
+            logSignal.Set();
             
             // Still output to console immediately for debugging
             Console.WriteLine(combinedLogOutput);
@@ -665,15 +755,12 @@ namespace GlobalHotkeys
                     // Use cached process lookups for much faster performance
                     lock (processCacheLock)
                     {
-                        // Pre-allocate list capacity for better performance
-                        currentAppsToMute.Capacity = Math.Max(currentAppsToMute.Capacity, processNameList.Count);
-                        
                         foreach (string processNameToLookFor in processNameList)
                         {
-                            if (processCache.TryGetValue(processNameToLookFor, out Process[]? processesFound))
+                            if (processCache.TryGetValue(processNameToLookFor, out int count) && count > 0)
                             {
                                 currentAppsToMute.Add(processNameToLookFor);
-                                Log($"\t@@@ Game Found: '{processNameToLookFor}' (cached)");
+                                Log($"\t@@@ Game Found: '{processNameToLookFor}' (cached x{count})");
                             }
                             else
                             {
@@ -702,13 +789,14 @@ namespace GlobalHotkeys
                     
                     string procNameTemp = foregroundProcess.ProcessName;
                     Log($"@@@ Foreground Process Name: '{procNameTemp}'");
-                    if (processNameList.Contains(procNameTemp)) 
+                    if (processNameSet.Contains(procNameTemp)) 
                     {
                         Log($"### Process: '{procNameTemp}' already exists in mute list, skipping");
                     }
                     else 
                     {
                         processNameList.Add(procNameTemp);
+                        processNameSet.Add(procNameTemp);
                         Log($"$$$ Adding process: '{procNameTemp}' to mute list and saving to file");
                         SaveApplications();
                         RefreshProcessCache(); // Refresh cache after adding new process
