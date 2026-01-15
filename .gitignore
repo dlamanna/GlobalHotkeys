@@ -1,0 +1,25 @@
+# Build outputs
+**/bin/
+**/obj/
+
+# Visual Studio
+.vs/
+**/*.user
+**/*.suo
+**/*.userosscache
+**/*.sln.docstates
+
+# VS Code
+.vscode/
+
+# Publish output (created by scripts)
+publish/
+
+# Local git-recovery artifacts
+.git.corrupt-*/
+
+# Signing keys / certs
+**/*.pfx
+
+# Local stray binaries (should come from NuGet, not committed)
+GlobalHotkeys/SpotifyAPI*.dll

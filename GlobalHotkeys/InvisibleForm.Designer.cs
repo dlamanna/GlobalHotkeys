@@ -1,6 +1,6 @@
 ﻿namespace GlobalHotkeys
 {
-    partial class Form1
+    partial class InvisibleForm
     {
         /// <summary>
         /// Required designer variable.
@@ -30,12 +30,12 @@
         {
             this.SuspendLayout();
             // 
-            // Form1
+            // InvisibleForm
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(120, 0);
-            this.Name = "Form1";
+            this.Name = "InvisibleForm";
             this.ShowInTaskbar = false;
             this.Text = "GlobalHotkeys";
             this.WindowState = System.Windows.Forms.FormWindowState.Minimized;
