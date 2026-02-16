@@ -23,3 +23,6 @@ publish/
 
 # Local stray binaries (should come from NuGet, not committed)
 GlobalHotkeys/SpotifyAPI*.dll
+
+# Claude Code project docs
+CLAUDE.md

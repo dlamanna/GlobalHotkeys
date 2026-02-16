@@ -1,0 +1,26 @@
+Code Review - GlobalHotkeys
+
+Summary
+A background WinForms app that registers global hotkeys to mute/unmute audio sessions for selected processes, toggle a crosshair app, and launch AutoIt scripts. Uses NAudio for audio sessions with caching and background logging.
+
+How It Works
+Program.cs runs InvisibleForm.
+InvisibleForm registers Ctrl+Numpad hotkeys, scans ProcessList.txt and SoundDevices.txt, and toggles audio session mutes via NAudio.
+Performance optimizations include process and audio session caches refreshed by timers.
+
+Strengths
+Good performance hygiene (cached process counts, cached audio sessions, background log writer).
+Useful guardrails for missing config files.
+
+Findings
+1. Medium: Several executable paths are hardcoded (AutoIt scripts, Crosshair, ToolTipper). Missing files produce runtime failures with no recovery. Consider moving these into a config file next to ProcessList.txt/SoundDevices.txt.
+
+Resolved
+- DisposeResources is now called from InvisibleForm.Designer.cs Dispose(bool) override.
+- Process objects from GetProcessesByName are now properly disposed in all hotkey handlers.
+- Redundant reflection fallback code in GetProcessNameFromSession has been simplified.
+- Dead code removed (MuteProcessDirectly, KEYBDINPUT.cs).
+- KeyboardHook.RegisterHotKey no longer throws on failure; returns false instead.
+- KillProgram now uses Log() instead of Console.WriteLine.
+- Log path inconsistency between ResetLog and ProcessLogQueue fixed.
+- Magic numbers in hotkey switch replaced with Keys enum values.

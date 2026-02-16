@@ -80,11 +80,7 @@ namespace GlobalHotkeys
             _currentId++;
 
             // register the hot key.
-            bool success = RegisterHotKey(_window.Handle, _currentId, (uint)modifier, (uint)key);
-            if (!success) {
-                throw new InvalidOperationException("### Couldn't register the hot key: " + modifier.ToString() + " | " + key.ToString());
-            }
-            return success;
+            return RegisterHotKey(_window.Handle, _currentId, (uint)modifier, (uint)key);
         }
 
         /// <summary>

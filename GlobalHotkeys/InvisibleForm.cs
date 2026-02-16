@@ -92,12 +92,10 @@ namespace GlobalHotkeys
             return null;
         }
 
-        // Method to get the actual process name from an audio session
         private string? GetProcessNameFromSession(AudioSessionControl session)
         {
             try
             {
-                // Fast path: PID -> process name (cached reflection)
                 int? pid = TryGetSessionProcessIdFast(session);
                 if (pid is int p && p > 0)
                 {
@@ -111,244 +109,15 @@ namespace GlobalHotkeys
                     }
                     catch
                     {
-                        // Process might not exist anymore, continue
+                        // Process might not exist anymore
                     }
-                }
-
-                // First, try to access the GetProcessID property directly
-                var sessionType = session.GetType();
-                var processIdProperty = sessionType.GetProperty("GetProcessID");
-                
-                if (processIdProperty != null)
-                {
-                    try
-                    {
-                        var processId = processIdProperty.GetValue(session);
-                        if (processId != null)
-                        {
-                            if (processId is uint processIdUint && processIdUint > 0)
-                            {
-                                try
-                                {
-                                    using var process = Process.GetProcessById((int)processIdUint);
-                                    if (!string.IsNullOrEmpty(process.ProcessName))
-                                    {
-                                        //Log($"%%% Found process: {process.ProcessName} (PID: {processIdUint})");
-                                        return process.ProcessName;
-                                    }
-                                }
-                                catch
-                                {
-                                    // Process might not exist anymore, continue
-                                }
-                            }
-                            else if (processId is int processIdInt && processIdInt > 0)
-                            {
-                                try
-                                {
-                                    using var process = Process.GetProcessById(processIdInt);
-                                    if (!string.IsNullOrEmpty(process.ProcessName))
-                                    {
-                                        //Log($"%%% Found process: {process.ProcessName} (PID: {processIdInt})");
-                                        return process.ProcessName;
-                                    }
-                                }
-                                catch
-                                {
-                                    // Process might not exist anymore, continue
-                                }
-                            }
-                        }
-                    }
-                    catch (Exception)
-                    {
-                        //Log("%%% Error accessing GetProcessID property");
-                    }
-                }
-                
-                // If direct property access fails, try reflection on internal fields
-                var fields = sessionType.GetFields(System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                
-                foreach (var field in fields)
-                {
-                    try
-                    {
-                        var value = field.GetValue(session);
-                        if (value != null)
-                        {
-                            var valueType = value.GetType();
-                            
-                            // Look for methods that can give us the process ID
-                            var methods = valueType.GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
-                            
-                            foreach (var method in methods)
-                            {
-                                try
-                                {
-                                    if (method.Name.Contains("Process") || method.Name.Contains("ProcessId") || method.Name.Contains("GetProcess"))
-                                    {
-                                        var result = method.Invoke(value, null);
-                                        if (result != null)
-                                        {
-                                            if (result is uint processId)
-                                            {
-                                                var actualProcessId = processId;
-                                                if (actualProcessId > 0)
-                                                {
-                                                    try
-                                                    {
-                                                        using var process = Process.GetProcessById((int)actualProcessId);
-                                                        if (!string.IsNullOrEmpty(process.ProcessName))
-                                                        {
-                                                            //Log($"%%% Found process: {process.ProcessName} (PID: {actualProcessId})");
-                                                            return process.ProcessName;
-                                                        }
-                                                    }
-                                                    catch
-                                                    {
-                                                        // Process might not exist anymore, continue
-                                                    }
-                                                }
-                                            }
-                                            else if (result is int processIdInt)
-                                            {
-                                                var actualProcessId = (uint)processIdInt;
-                                                if (actualProcessId > 0)
-                                                {
-                                                    try
-                                                    {
-                                                        using var process = Process.GetProcessById(processIdInt);
-                                                        if (!string.IsNullOrEmpty(process.ProcessName))
-                                                        {
-                                                            //Log($"%%% Found process: {process.ProcessName} (PID: {actualProcessId})");
-                                                            return process.ProcessName;
-                                                        }
-                                                    }
-                                                    catch
-                                                    {
-                                                        // Process might not exist anymore, continue
-                                                    }
-                                                }
-                                            }
-                                            else if (result is string processName && !string.IsNullOrEmpty(processName))
-                                            {
-                                                //Log($"%%% Found process name directly: {processName}");
-                                                return processName;
-                                            }
-                                        }
-                                    }
-                                }
-                                catch
-                                {
-                                    // Continue to next method
-                                }
-                            }
-                            
-                            // Also check properties
-                            var properties = valueType.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
-                            foreach (var prop in properties)
-                            {
-                                try
-                                {
-                                    if (prop.Name.Contains("Process") || prop.Name.Contains("ProcessId"))
-                                    {
-                                        var result = prop.GetValue(value);
-                                        if (result != null)
-                                        {
-                                            if (result is uint processId)
-                                            {
-                                                var actualProcessId = processId;
-                                                if (actualProcessId > 0)
-                                                {
-                                                    try
-                                                    {
-                                                        using var process = Process.GetProcessById((int)actualProcessId);
-                                                        if (!string.IsNullOrEmpty(process.ProcessName))
-                                                        {
-                                                            //Log($"%%% Found process: {process.ProcessName} (PID: {actualProcessId})");
-                                                            return process.ProcessName;
-                                                        }
-                                                    }
-                                                    catch
-                                                    {
-                                                        // Process might not exist anymore, continue
-                                                    }
-                                                }
-                                            }
-                                            else if (result is int processIdInt)
-                                            {
-                                                var actualProcessId = (uint)processIdInt;
-                                                if (actualProcessId > 0)
-                                                {
-                                                    try
-                                                    {
-                                                        using var process = Process.GetProcessById(processIdInt);
-                                                        if (!string.IsNullOrEmpty(process.ProcessName))
-                                                        {
-                                                            //Log($"%%% Found process: {process.ProcessName} (PID: {actualProcessId})");
-                                                            return process.ProcessName;
-                                                        }
-                                                    }
-                                                    catch
-                                                    {
-                                                        // Process might not exist anymore, continue
-                                                    }
-                                                }
-                                            }
-                                            else if (result is string processName && !string.IsNullOrEmpty(processName))
-                                            {
-                                                //Log($"%%% Found process: {processName}");
-                                                return processName;
-                                            }
-                                        }
-                                    }
-                                }
-                                catch
-                                {
-                                    // Continue to next property
-                                }
-                            }
-                        }
-                    }
-                    catch
-                    {
-                        // Continue to next field
-                    }
-                }
-                
-                // If we still can't find it, try a different approach - look for the session identifier
-                try
-                {
-                    var identifierMethod = sessionType.GetMethod("GetSessionIdentifier", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
-                    if (identifierMethod != null)
-                    {
-                        var identifier = identifierMethod.Invoke(session, null) as string;
-                        if (!string.IsNullOrEmpty(identifier))
-                        {
-                            if (identifier.Contains('\\'))
-                            {
-                                var parts = identifier.Split('\\');
-                                foreach (var part in parts)
-                                {
-                                    if (!string.IsNullOrEmpty(part) && !part.Contains('.') && part.Length > 2)
-                                    {
-                                        return part;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                catch
-                {
-                    // Continue
                 }
             }
             catch (Exception ex)
             {
                 Log($"### Error getting process name from session: {ex.Message}");
             }
-            
+
             return null;
         }
 
@@ -851,7 +620,7 @@ namespace GlobalHotkeys
         {
             try
             {
-                using (File.Create("GlobalHotkeys.log")) { };
+                using (File.Create(Path.Combine(AppContext.BaseDirectory, "GlobalHotkeys.log"))) { };
             }
             catch (Exception e)
             {
@@ -864,34 +633,40 @@ namespace GlobalHotkeys
             Log($"^^^ Modifier: {e.Modifier}({(int)e.Modifier}),\t Key: {e.Key}({(int)e.Key})");
 
             switch((int)e.Key) {
-                case 19:
+                case (int)Keys.Pause:
                     Log("!!! Do Firefox Toggle");
                     Process[] FirefoxProcesses = Process.GetProcessesByName("Firefox");
-                    Process? FirefoxProcess = null;
-                    foreach (Process p in FirefoxProcesses)
+                    try
                     {
-                        //Log($"Process: {p.Id}\t{p.MainWindowTitle}");
-                        if (p.MainWindowTitle.Length > 0)
+                        Process? FirefoxProcess = null;
+                        foreach (Process p in FirefoxProcesses)
                         {
-                            FirefoxProcess = p;
-                            Log($"@@@ Found active tab: {FirefoxProcess.MainWindowTitle}");
-                            break;
+                            if (p.MainWindowTitle.Length > 0)
+                            {
+                                FirefoxProcess = p;
+                                Log($"@@@ Found active tab: {FirefoxProcess.MainWindowTitle}");
+                                break;
+                            }
+                        }
+
+                        if (FirefoxProcess != null && FirefoxProcess.MainWindowHandle != IntPtr.Zero)
+                        {
+                            var procID = FirefoxProcess.MainWindowHandle;
+                            Keyboard.Key firefoxHotkey = new Keyboard.Key(Keyboard.Messaging.VKeys.KEY_P, Keyboard.Messaging.VKeys.KEY_LSHIFT, Keyboard.Messaging.ShiftType.SHIFT_ALT); //ALT + SHIFT + P
+                            firefoxHotkey.PressBackground(procID);
+                        }
+                        else
+                        {
+                            Log("### No Firefox process with active window found");
                         }
                     }
-                    
-                    if (FirefoxProcess != null && FirefoxProcess.MainWindowHandle != IntPtr.Zero)
+                    finally
                     {
-                        var procID = FirefoxProcess.MainWindowHandle;
-                        Keyboard.Key firefoxHotkey = new Keyboard.Key(Keyboard.Messaging.VKeys.KEY_P, Keyboard.Messaging.VKeys.KEY_LSHIFT, Keyboard.Messaging.ShiftType.SHIFT_ALT); //ALT + SHIFT + P
-                        firefoxHotkey.PressBackground(procID);
-                    }
-                    else
-                    {
-                        Log("### No Firefox process with active window found");
+                        foreach (var p in FirefoxProcesses) p.Dispose();
                     }
                     break;
 
-                case 97:
+                case (int)Keys.NumPad1:
                     Log("!!! Do Game Mute Toggle");
                     currentAppsToMute.Clear();
                     
@@ -922,41 +697,50 @@ namespace GlobalHotkeys
 
                     break;
 
-                case 99:
-                    var foregroundProcess = GetForegroundProcess();
-                    if (foregroundProcess == null)
+                case (int)Keys.NumPad3:
+                    using (var foregroundProcess = GetForegroundProcess())
                     {
-                        Log("### Could not get foreground process");
-                        break;
-                    }
-                    
-                    string procNameTemp = foregroundProcess.ProcessName;
-                    Log($"@@@ Foreground Process Name: '{procNameTemp}'");
-                    if (processNameSet.Contains(procNameTemp)) 
-                    {
-                        Log($"### Process: '{procNameTemp}' already exists in mute list, skipping");
-                    }
-                    else 
-                    {
-                        processNameList.Add(procNameTemp);
-                        processNameSet.Add(procNameTemp);
-                        Log($"$$$ Adding process: '{procNameTemp}' to mute list and saving to file");
-                        SaveApplications();
-                        RefreshProcessCache(); // Refresh cache after adding new process
+                        if (foregroundProcess == null)
+                        {
+                            Log("### Could not get foreground process");
+                            break;
+                        }
+
+                        string procNameTemp = foregroundProcess.ProcessName;
+                        Log($"@@@ Foreground Process Name: '{procNameTemp}'");
+                        if (processNameSet.Contains(procNameTemp))
+                        {
+                            Log($"### Process: '{procNameTemp}' already exists in mute list, skipping");
+                        }
+                        else
+                        {
+                            processNameList.Add(procNameTemp);
+                            processNameSet.Add(procNameTemp);
+                            Log($"$$$ Adding process: '{procNameTemp}' to mute list and saving to file");
+                            SaveApplications();
+                            RefreshProcessCache();
+                        }
                     }
                     break;                
 
-                case 100:
+                case (int)Keys.NumPad4:
                     Log("!!! Do PetBattle/Tarkov Toggle");
                     isPetBattling = !isPetBattling;
-                    if(isPetBattling) 
+                    if(isPetBattling)
                     {
                         Process[] prunedProcessList = Process.GetProcessesByName("EscapeFromTarkov");
-                        if(prunedProcessList.Length >= 1) {
-                            RunProgram(tarkovFleaRefreshPath);
+                        try
+                        {
+                            if(prunedProcessList.Length >= 1) {
+                                RunProgram(tarkovFleaRefreshPath);
+                            }
+                            else {
+                                RunProgram(petBattlePath);
+                            }
                         }
-                        else {
-                            RunProgram(petBattlePath);
+                        finally
+                        {
+                            foreach (var p in prunedProcessList) p.Dispose();
                         }
                     }
                     else {
@@ -964,30 +748,37 @@ namespace GlobalHotkeys
                     }
                     break;
 
-                case 106:
+                case (int)Keys.Multiply:
                     Log("!!! Do Crosshair Toggle");
                     string exeName = "Crosshair";
                     bool isRunning = false;
                     Process[] processList = Process.GetProcessesByName(exeName);
-                    if(processList.Length >= 1) 
+                    try
                     {
-                        foreach(Process p in processList) 
+                        if(processList.Length >= 1)
                         {
-                            try
+                            foreach(Process p in processList)
                             {
-                                Log($"@@@ Process Found: {p.ProcessName}\t{{{p.Id}}}");
-                                p.Kill();
+                                try
+                                {
+                                    Log($"@@@ Process Found: {p.ProcessName}\t{{{p.Id}}}");
+                                    p.Kill();
+                                }
+                                catch (Exception ex)
+                                {
+                                    Log($"### Error killing process: {ex.Message}");
+                                }
                             }
-                            catch (Exception ex)
-                            {
-                                Log($"### Error killing process: {ex.Message}");
-                            }
+                            isRunning = true;
                         }
-                        isRunning = true;
-                    }
 
-                    if(!isRunning) {
-                        RunProgram(crosshairPath, "");
+                        if(!isRunning) {
+                            RunProgram(crosshairPath, "");
+                        }
+                    }
+                    finally
+                    {
+                        foreach (var p in processList) p.Dispose();
                     }
                     break;
                 default:
@@ -996,8 +787,7 @@ namespace GlobalHotkeys
         }
 
 
-
-                public void SetVolume()
+        public void SetVolume()
         {
             try
             {
@@ -1075,95 +865,6 @@ namespace GlobalHotkeys
             }
         }
 
-        private void MuteProcessDirectly(string processName)
-        {
-            try
-            {
-                var devices = audioDeviceEnumerator?.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active);
-                if (devices == null) return;
-
-                foreach (var device in devices)
-                {
-                    try
-                    {
-                        // Check if this device is in our list of relevant devices
-                        bool isRelevantDevice = false;
-                        if (relevantSoundDevices.Count > 0)
-                        {
-                            string friendly = device.FriendlyName;
-                            for (int d = 0; d < relevantSoundDevices.Count; d++)
-                            {
-                                if (friendly.Contains(relevantSoundDevices[d], StringComparison.OrdinalIgnoreCase))
-                                {
-                                    isRelevantDevice = true;
-                                    break;
-                                }
-                            }
-                        }
-                        
-                        if (!isRelevantDevice)
-                        {
-                            continue; // Skip non-relevant devices
-                        }
-                        
-                        var sessions = device.AudioSessionManager?.Sessions;
-                        if (sessions != null)
-                        {
-                            for (int i = 0; i < sessions.Count; i++)
-                            {
-                                var session = sessions[i];
-                                
-                                // Try to get the actual process name from the session
-                                string? sessionProcessName = null;
-                                
-                                try
-                                {
-                                    // Use reflection to access internal properties if available
-                                    var processProperty = session.GetType().GetProperty("Process");
-                                    if (processProperty != null)
-                                    {
-                                        var process = processProperty.GetValue(session);
-                                        if (process != null)
-                                        {
-                                            var processNameProperty = process.GetType().GetProperty("ProcessName");
-                                            if (processNameProperty != null)
-                                            {
-                                                sessionProcessName = processNameProperty.GetValue(process) as string;
-                                            }
-                                        }
-                                    }
-                                }
-                                catch (Exception) { /* Ignore reflection errors */ }
-                                
-                                // Only mute if this session belongs to the target process
-                                if (!string.IsNullOrEmpty(sessionProcessName) && 
-                                    sessionProcessName.Equals(processName, StringComparison.OrdinalIgnoreCase))
-                                {
-                                    var simpleVolume = session.SimpleAudioVolume;
-                                    if (simpleVolume != null)
-                                    {
-                                        bool newMuteState = !simpleVolume.Mute;
-                                        simpleVolume.Mute = newMuteState;
-                                        
-                                        Log($"@@@ Direct mute toggle on {processName} ({device.FriendlyName}): {(newMuteState ? "MUTED" : "UNMUTED")}");
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    catch (Exception) { /* Ignore individual device errors */ }
-                    finally
-                    {
-                        device?.Dispose();
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Log($"### Error in direct mute for {processName}: {ex.Message}");
-            }
-        }
-
         public static Process? GetForegroundProcess()
         {
             IntPtr hWnd = GetForegroundWindow();                                    // Get foreground window handle
@@ -1208,30 +909,31 @@ namespace GlobalHotkeys
         private void KillProgram(string exeName)
         {
             string[] exeNames = exeName.Split('_');
-            foreach(string s in exeNames) 
+            foreach(string s in exeNames)
             {
                 try
                 {
                     Process[] processList = Process.GetProcessesByName(s);
-                    if(processList.Length >= 1) 
+                    foreach(Process p in processList)
                     {
-                        foreach(Process p in processList) 
+                        try
                         {
-                            try
-                            {
-                                Console.WriteLine($"Process Found: {p.ProcessName}\t{{{p.Id}}}");
-                                p.Kill();
-                            }
-                            catch (Exception e)
-                            {
-                                Console.WriteLine($"Error killing process {p.ProcessName}: {e.Message}");
-                            }
+                            Log($"@@@ Process Found: {p.ProcessName}\t{{{p.Id}}}");
+                            p.Kill();
+                        }
+                        catch (Exception e)
+                        {
+                            Log($"### Error killing process {p.ProcessName}: {e.Message}");
+                        }
+                        finally
+                        {
+                            p.Dispose();
                         }
                     }
                 }
                 catch (Exception e)
                 {
-                    Console.WriteLine($"Error finding processes for {s}: {e.Message}");
+                    Log($"### Error finding processes for {s}: {e.Message}");
                 }
             }
         }
