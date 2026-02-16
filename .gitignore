@@ -25,4 +25,4 @@ publish/
 GlobalHotkeys/SpotifyAPI*.dll
 
 # Claude Code project docs
-CLAUDE.md
+.claude/
